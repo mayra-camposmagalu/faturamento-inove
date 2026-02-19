@@ -30,7 +30,6 @@ def check_password():
 
 if check_password():
 
-    # Título Principal
     st.title("📊 Faturamento Inove")
     st.markdown("---")
 
@@ -46,7 +45,8 @@ if check_password():
     def load_data():
         try:
             df = pd.read_csv(LINK_GOOGLE_SHEETS)
-            df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
+            # Limpeza inicial
+            df = df.dropna(how='all', axis=0)
             df.columns = [str(c).strip() for c in df.columns]
 
             mapa = {
@@ -63,13 +63,18 @@ if check_password():
                         df = df.rename(columns={var: padrao})
                         break
             
+            # LIMPEZA DE VALORES FINANCEIROS
             if 'Valor Item' in df.columns:
-                df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
                 df['Valor Item'] = pd.to_numeric(df['Valor Item'], errors='coerce').fillna(0)
             
             if 'Quantidade' in df.columns:
                 df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
 
+            # LIMPEZA DE PLATAFORMA (Remove espaços extras que fazem o filtro dar 0)
+            if 'Plataforma' in df.columns:
+                df['Plataforma'] = df['Plataforma'].astype(str).str.strip()
+            
             if 'Data' in df.columns:
                 df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
                 df = df.dropna(subset=['Data'])
@@ -77,38 +82,30 @@ if check_password():
             else:
                 df['Mês/Ano'] = 'Sem Data'
                 
-            df['Plataforma'] = df['Plataforma'].fillna('Outros').astype(str)
-            df = df[df['Valor Item'] > 0]
-            
             return df
         except Exception as e:
-            st.error(f"Erro na sincronização: {e}")
+            st.error(f"Erro: {e}")
             return pd.DataFrame()
 
     df = load_data()
 
     if not df.empty:
-        # --- SIDEBAR: FILTROS ---
         st.sidebar.header("Filtros")
         
-        # Filtro de Mês
         periodos = sorted([p for p in df['Mês/Ano'].unique() if p and str(p) != 'nan'])
         mes_sel = st.sidebar.multiselect("Mês:", options=periodos, default=periodos)
         
-        # Filtro de Plataforma com a opção "Todos"
-        plats_originais = sorted([p for p in df['Plataforma'].unique() if p and str(p) != 'nan'])
+        plats_originais = sorted([p for p in df['Plataforma'].unique() if p and str(p) != 'nan' and p != 'None'])
         opcoes_plataforma = ["Todos"] + plats_originais
         plat_sel = st.sidebar.multiselect("Plataforma:", options=opcoes_plataforma, default=["Todos"])
 
-        # --- LÓGICA DE FILTRAGEM REVISADA ---
-        # 1. Filtramos primeiro o período (Mês/Ano)
-        df_f = df[df['Mês/Ano'].isin(mes_sel)]
+        # FILTRAGEM
+        df_f = df[df['Mês/Ano'].isin(mes_sel)].copy()
 
-        # 2. Aplicamos o filtro de plataforma APENAS se "Todos" não estiver selecionado
         if "Todos" not in plat_sel:
             df_f = df_f[df_f['Plataforma'].isin(plat_sel)]
 
-        # --- MÉTRICAS ---
+        # MÉTRICAS
         c1, c2, c3 = st.columns(3)
         faturamento = df_f['Valor Item'].sum()
         c1.metric("Faturamento Total", formatar_moeda(faturamento))
@@ -117,14 +114,12 @@ if check_password():
 
         st.markdown("---")
 
-        # --- TABELAS ---
+        # TABELAS
         st.subheader("1. Faturamento por Plataforma")
         t1 = df_f.groupby('Plataforma')['Valor Item'].sum().reset_index().rename(columns={'Valor Item': 'Faturamento'})
         st.dataframe(t1.sort_values('Faturamento', ascending=False).style.format({'Faturamento': formatar_moeda}), use_container_width=True)
 
-        st.markdown("---")
         col_a, col_b = st.columns(2)
-
         with col_a:
             st.subheader("2. Resumo por Produto")
             t2 = df_f.groupby('Produto').agg({'Quantidade': 'sum', 'Valor Item': 'sum'}).reset_index().rename(columns={'Valor Item': 'Faturamento'})
@@ -135,12 +130,8 @@ if check_password():
             t3 = df_f.groupby(['Plataforma', 'Produto']).agg({'Quantidade': 'sum', 'Valor Item': 'sum'}).reset_index().rename(columns={'Valor Item': 'Faturamento'})
             st.dataframe(t3.sort_values(['Plataforma', 'Faturamento'], ascending=[True, False]).style.format({'Faturamento': formatar_moeda}), use_container_width=True)
 
-        # --- DOWNLOAD ---
         st.markdown("---")
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             df_f.to_excel(writer, index=False)
         st.download_button("📥 Baixar Base Filtrada (Excel)", data=buffer.getvalue(), file_name="Faturamento_Inove.xlsx")
-
-    else:
-        st.warning("Aguardando dados do Google Sheets...")
