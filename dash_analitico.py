@@ -44,17 +44,19 @@ if check_password():
     @st.cache_data(ttl=10)
     def load_data():
         try:
+            # Lê o CSV do Google Sheets
             df = pd.read_csv(LINK_GOOGLE_SHEETS)
-            # Limpeza inicial
-            df = df.dropna(how='all', axis=0)
+            
+            # Limpa espaços nos nomes das colunas
             df.columns = [str(c).strip() for c in df.columns]
 
+            # MAPEAMENTO EXATO COM SEUS NOVOS CAMPOS
             mapa = {
-                'Plataforma': ['PLATAFORMA', 'CANAL', 'MARKETPLACE', 'Plataforma'],
-                'Produto': ['PRODUTO', 'DESC. NOTA', 'DESCRICAO', 'Desc. Nota', 'Produto'],
-                'Quantidade': ['QUANTIDADE', 'QTD', 'Soma de Quantidade', 'Quantidade'],
-                'Valor Item': ['VALOR ITEM', 'VALOR TOTAL DO ITEM', 'VALOR_TOTAL', 'Soma de Valor Item', 'Valor Item'],
-                'Data': ['DATA', 'DATA DE EMISSÃO', 'DATA EMISSAO', 'Data de Emissão', 'Data']
+                'Plataforma': ['Plataforma', 'PLATAFORMA'],
+                'Produto': ['Produto', 'PRODUTO', 'Descrição do Produto'],
+                'Quantidade': ['Quantidade', 'QUANTIDADE', 'Qtd'],
+                'Valor Item': ['VALOR TOTAL DO ITEM', 'VALOR TOTAL DO ITEM ', 'Valor Item'],
+                'Data': ['Data de Emissão', 'DATA DE EMISSÃO', 'Data']
             }
 
             for padrao, variacoes in mapa.items():
@@ -63,18 +65,25 @@ if check_password():
                         df = df.rename(columns={var: padrao})
                         break
             
-            # LIMPEZA DE VALORES FINANCEIROS
+            # LIMPEZA DOS VALORES (Trata R$, pontos e vírgulas)
             if 'Valor Item' in df.columns:
-                df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
+                # Converte para string e limpa caracteres não numéricos, exceto vírgula/ponto
+                df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace(' ', '', regex=False)
+                
+                # Lógica para converter padrão brasileiro (1.000,00) para padrão Python (1000.00)
+                # Se houver ponto e vírgula, remove o ponto e troca vírgula por ponto
+                df['Valor Item'] = df['Valor Item'].apply(lambda x: x.replace('.', '').replace(',', '.') if ',' in x else x)
+                
                 df['Valor Item'] = pd.to_numeric(df['Valor Item'], errors='coerce').fillna(0)
             
             if 'Quantidade' in df.columns:
                 df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
 
-            # LIMPEZA DE PLATAFORMA (Remove espaços extras que fazem o filtro dar 0)
+            # Limpa a coluna de Plataforma contra espaços vazios
             if 'Plataforma' in df.columns:
                 df['Plataforma'] = df['Plataforma'].astype(str).str.strip()
             
+            # Tratamento da Data de Emissão
             if 'Data' in df.columns:
                 df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
                 df = df.dropna(subset=['Data'])
@@ -82,9 +91,12 @@ if check_password():
             else:
                 df['Mês/Ano'] = 'Sem Data'
                 
+            # Filtra apenas linhas que possuem valor maior que zero
+            df = df[df['Valor Item'] > 0]
+            
             return df
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro ao processar dados: {e}")
             return pd.DataFrame()
 
     df = load_data()
@@ -92,29 +104,33 @@ if check_password():
     if not df.empty:
         st.sidebar.header("Filtros")
         
+        # Filtro de Mês
         periodos = sorted([p for p in df['Mês/Ano'].unique() if p and str(p) != 'nan'])
         mes_sel = st.sidebar.multiselect("Mês:", options=periodos, default=periodos)
         
-        plats_originais = sorted([p for p in df['Plataforma'].unique() if p and str(p) != 'nan' and p != 'None'])
-        opcoes_plataforma = ["Todos"] + plats_originais
+        # Filtro de Plataforma
+        plats_disponiveis = sorted([p for p in df['Plataforma'].unique() if p and str(p) != 'nan' and p != 'None'])
+        opcoes_plataforma = ["Todos"] + plats_disponiveis
         plat_sel = st.sidebar.multiselect("Plataforma:", options=opcoes_plataforma, default=["Todos"])
 
-        # FILTRAGEM
+        # --- Lógica de Filtragem ---
         df_f = df[df['Mês/Ano'].isin(mes_sel)].copy()
 
         if "Todos" not in plat_sel:
             df_f = df_f[df_f['Plataforma'].isin(plat_sel)]
 
-        # MÉTRICAS
+        # --- Dashboard ---
         c1, c2, c3 = st.columns(3)
-        faturamento = df_f['Valor Item'].sum()
-        c1.metric("Faturamento Total", formatar_moeda(faturamento))
-        c2.metric("Quantidade Total", f"{int(df_f['Quantidade'].sum()):,}".replace(",", "."))
-        c3.metric("Ticket Médio", formatar_moeda(faturamento / len(df_f) if len(df_f) > 0 else 0))
+        total_faturado = df_f['Valor Item'].sum()
+        total_qtd = df_f['Quantidade'].sum()
+        
+        c1.metric("Faturamento Total", formatar_moeda(total_faturado))
+        c2.metric("Qtd de Itens", f"{int(total_qtd):,}".replace(",", "."))
+        c3.metric("Ticket Médio/Item", formatar_moeda(total_faturado / total_qtd if total_qtd > 0 else 0))
 
         st.markdown("---")
 
-        # TABELAS
+        # Tabelas Dinâmicas
         st.subheader("1. Faturamento por Plataforma")
         t1 = df_f.groupby('Plataforma')['Valor Item'].sum().reset_index().rename(columns={'Valor Item': 'Faturamento'})
         st.dataframe(t1.sort_values('Faturamento', ascending=False).style.format({'Faturamento': formatar_moeda}), use_container_width=True)
@@ -131,7 +147,11 @@ if check_password():
             st.dataframe(t3.sort_values(['Plataforma', 'Faturamento'], ascending=[True, False]).style.format({'Faturamento': formatar_moeda}), use_container_width=True)
 
         st.markdown("---")
+        # Botão de Download
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             df_f.to_excel(writer, index=False)
-        st.download_button("📥 Baixar Base Filtrada (Excel)", data=buffer.getvalue(), file_name="Faturamento_Inove.xlsx")
+        st.download_button("📥 Baixar Relatório (Excel)", data=buffer.getvalue(), file_name="Faturamento_Inove.xlsx")
+
+    else:
+        st.info("Nenhum dado encontrado. Verifique se o Google Sheets possui as colunas 'VALOR TOTAL DO ITEM' e 'Data de Emissão' preenchidas corretamente.")
