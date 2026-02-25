@@ -26,45 +26,44 @@ if check_password():
     @st.cache_data(ttl=5)
     def load_data():
         try:
-            # Lê o CSV sem transformar nada primeiro
+            # Lê o CSV bruto
             df_raw = pd.read_csv(LINK_BASE)
             
-            # Remove espaços dos nomes das colunas
+            # Limpa nomes das colunas (remove espaços extras)
             df_raw.columns = [str(c).strip() for c in df_raw.columns]
             
-            # CRIANDO UM NOVO DATAFRAME LIMPO PARA NÃO MISTURAR COLUNAS
             df = pd.DataFrame()
             
-            # Identificação manual e forçada das colunas baseada no seu relato
+            # MAPEAMENTO FORÇADO (Baseado na sua imagem)
+            # Usamos a coluna exata 'Produto' para o nome e 'Quantidade' para o valor numérico
             df['Plataforma'] = df_raw['Plataforma'].astype(str).str.strip()
             df['Produto'] = df_raw['Produto'].astype(str).str.strip()
-            df['Quantidade'] = df_raw['Quantidade']
-            df['Valor Item'] = df_raw['VALOR TOTAL DO ITEM']
-            df['Data'] = df_raw['Data de Emissão']
-
-            # --- TRATAMENTO NUMÉRICO RIGOROSO ---
-            # Trata Valor Item
-            df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
-            df['Valor Item'] = pd.to_numeric(df['Valor Item'], errors='coerce').fillna(0)
             
-            # Trata Quantidade
-            df['Quantidade'] = df['Quantidade'].astype(str).str.replace(',', '.', regex=False).str.strip()
+            # Tratamento de Quantidade (converte 1,0 para 1)
+            df['Quantidade'] = df_raw['Quantidade'].astype(str).str.replace(',', '.', regex=False)
             df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
             
-            # Trata Data
-            df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
+            # Tratamento de Valor (VALOR TOTAL DO ITEM)
+            df['Valor Item'] = df_raw['VALOR TOTAL DO ITEM'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
+            df['Valor Item'] = pd.to_numeric(df['Valor Item'], errors='coerce').fillna(0)
+            
+            # Tratamento de Data
+            df['Data'] = pd.to_datetime(df_raw['Data de Emissão'], dayfirst=True, errors='coerce')
             df = df.dropna(subset=['Data'])
             df['Mês/Ano'] = df['Data'].dt.strftime('%m/%Y')
             
+            # Remove qualquer linha que tenha ficado com produto "nan" ou vazio
+            df = df[df['Produto'] != 'nan']
+            
             return df
         except Exception as e:
-            st.error(f"Erro na leitura das colunas: {e}. Verifique se os nomes das colunas no Sheets não mudaram.")
+            st.error(f"Erro na estrutura da planilha: {e}")
             return pd.DataFrame()
 
     df = load_data()
 
     if not df.empty:
-        # FILTROS
+        # SIDEBAR
         st.sidebar.header("Filtros")
         meses = sorted(df['Mês/Ano'].unique(), reverse=True)
         mes_sel = st.sidebar.multiselect("Mês:", meses, default=meses)
@@ -82,25 +81,35 @@ if check_password():
         total_qtd = df_f['Quantidade'].sum()
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Faturamento", f"R$ {total_fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        c2.metric("Quantidade", f"{int(total_qtd):,}".replace(",", "."))
-        c3.metric("Ticket Médio", f"R$ {(total_fat/len(df_f) if len(df_f)>0 else 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        c1.metric("Faturamento Total", f"R$ {total_fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        c2.metric("Qtd Total Vendida", f"{int(total_qtd):,}".replace(",", "."))
+        c3.metric("Ticket Médio", f"R$ {(total_fat/total_qtd if total_qtd>0 else 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
         st.markdown("---")
 
-        # TABELA PRINCIPAL - Onde estava o erro
-        st.subheader("Análise Detalhada por Produto")
+        # TABELAS DE AGRUPAMENTO
+        col_esq, col_dir = st.columns(2)
         
-        # Agrupamento explícito
-        tabela_final = df_f.groupby(['Produto'], as_index=False).agg({
+        with col_esq:
+            st.subheader("Ranking por Produto")
+            # Agrupamento rigoroso por Produto
+            ranking = df_f.groupby('Produto', as_index=False).agg({
+                'Quantidade': 'sum',
+                'Valor Item': 'sum'
+            }).rename(columns={'Valor Item': 'Faturamento'})
+            st.dataframe(ranking.sort_values('Faturamento', ascending=False), use_container_width=True)
+
+        with col_dir:
+            st.subheader("Faturamento por Plataforma")
+            plat_sum = df_f.groupby('Plataforma', as_index=False)['Valor Item'].sum().rename(columns={'Valor Item': 'Faturamento'})
+            st.dataframe(plat_sum.sort_values('Faturamento', ascending=False), use_container_width=True)
+
+        st.subheader("Visão Detalhada (Plataforma + Produto)")
+        detalhe = df_f.groupby(['Plataforma', 'Produto'], as_index=False).agg({
             'Quantidade': 'sum',
             'Valor Item': 'sum'
-        }).rename(columns={'Valor Item': 'Faturamento Total'})
-        
-        # Ordenar para ver os principais
-        tabela_final = tabela_final.sort_values('Faturamento Total', ascending=False)
-        
-        st.dataframe(tabela_final, use_container_width=True)
+        }).rename(columns={'Valor Item': 'Faturamento'})
+        st.dataframe(detalhe.sort_values(['Plataforma', 'Faturamento'], ascending=[True, False]), use_container_width=True)
 
-        # Botão de conferência
-        st.write("Dica: Se os nomes ainda estiverem trocados, verifique se a coluna 'Produto' no Sheets não está deslocada.")
+    else:
+        st.warning("Verifique se as colunas 'Produto' e 'VALOR TOTAL DO ITEM' estão preenchidas no Sheets.")
