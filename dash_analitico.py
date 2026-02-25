@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Faturamento Inove", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Faturamento Inove", layout="wide")
 
+# --- LOGIN ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == "Inove2026":
@@ -12,69 +13,58 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
-        st.title("🔐 Acesso Restrito")
+        st.title("🔐 Acesso Inove")
         st.text_input("Senha:", type="password", on_change=password_entered, key="password")
         return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Senha:", type="password", on_change=password_entered, key="password")
-        st.error("😕 Senha incorreta.")
-        return False
-    return True
+    return st.session_state.get("password_correct", False)
 
 if check_password():
     st.title("📊 Faturamento Inove")
-    st.markdown("---")
 
     LINK_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR7RsXNDvNTLHTpbvDjjN9yUWq2EzTiCLDmXIFc3b_1g7G00hFCiuWcD-qWuJOD9w/pub?gid=1866890896&single=true&output=csv"
-
-    def formatar_moeda(valor):
-        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     @st.cache_data(ttl=5)
     def load_data():
         try:
-            df = pd.read_csv(LINK_BASE)
-            df.columns = [str(c).strip() for c in df.columns]
-
-            mapa = {
-                'Plataforma': ['Plataforma', 'PLATAFORMA'],
-                'Produto': ['Produto', 'PRODUTO', 'Descrição do Produto'],
-                'Quantidade': ['Quantidade', 'QUANTIDADE', 'Qtd'],
-                'Valor Item': ['VALOR TOTAL DO ITEM', 'Valor Item'],
-                'Data': ['Data de Emissão', 'DATA DE EMISSÃO', 'Data']
-            }
-
-            for padrao, variacoes in mapa.items():
-                for var in variacoes:
-                    if var in df.columns:
-                        df = df.rename(columns={var: padrao})
-                        break
+            # Lê o CSV sem transformar nada primeiro
+            df_raw = pd.read_csv(LINK_BASE)
             
-            # Limpeza Crítica de Texto (Remove espaços e padroniza)
-            df['Produto'] = df['Produto'].astype(str).str.strip()
-            df['Plataforma'] = df['Plataforma'].astype(str).str.strip()
+            # Remove espaços dos nomes das colunas
+            df_raw.columns = [str(c).strip() for c in df_raw.columns]
             
-            # Tratamento de Valores
+            # CRIANDO UM NOVO DATAFRAME LIMPO PARA NÃO MISTURAR COLUNAS
+            df = pd.DataFrame()
+            
+            # Identificação manual e forçada das colunas baseada no seu relato
+            df['Plataforma'] = df_raw['Plataforma'].astype(str).str.strip()
+            df['Produto'] = df_raw['Produto'].astype(str).str.strip()
+            df['Quantidade'] = df_raw['Quantidade']
+            df['Valor Item'] = df_raw['VALOR TOTAL DO ITEM']
+            df['Data'] = df_raw['Data de Emissão']
+
+            # --- TRATAMENTO NUMÉRICO RIGOROSO ---
+            # Trata Valor Item
             df['Valor Item'] = df['Valor Item'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
             df['Valor Item'] = pd.to_numeric(df['Valor Item'], errors='coerce').fillna(0)
             
-            # Tratamento de Quantidade (Garante que seja número limpo)
+            # Trata Quantidade
             df['Quantidade'] = df['Quantidade'].astype(str).str.replace(',', '.', regex=False).str.strip()
             df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
             
-            # Tratamento de Datas
+            # Trata Data
             df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
             df = df.dropna(subset=['Data'])
             df['Mês/Ano'] = df['Data'].dt.strftime('%m/%Y')
             
             return df
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro na leitura das colunas: {e}. Verifique se os nomes das colunas no Sheets não mudaram.")
             return pd.DataFrame()
 
     df = load_data()
 
     if not df.empty:
+        # FILTROS
         st.sidebar.header("Filtros")
         meses = sorted(df['Mês/Ano'].unique(), reverse=True)
         mes_sel = st.sidebar.multiselect("Mês:", meses, default=meses)
@@ -88,32 +78,29 @@ if check_password():
             df_f = df_f[df_f['Plataforma'].isin(plat_sel)]
 
         # KPIs
-        c1, c2, c3 = st.columns(3)
-        total = df_f['Valor Item'].sum()
-        c1.metric("Faturamento Total", formatar_moeda(total))
-        c2.metric("Quantidade Total", f"{int(df_f['Quantidade'].sum()):,}".replace(",", "."))
-        c3.metric("Ticket Médio", formatar_moeda(total / len(df_f) if len(df_f) > 0 else 0))
-
-        st.markdown("---")
-
-        # 1. Plataforma
-        t1 = df_f.groupby('Plataforma', as_index=False)['Valor Item'].sum().rename(columns={'Valor Item': 'Faturamento'})
-        st.subheader("1. Faturamento por Plataforma")
-        st.dataframe(t1.style.format({'Faturamento': formatar_moeda}), use_container_width=True)
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.subheader("2. Ranking de Produtos")
-            t2 = df_f.groupby('Produto', as_index=False).agg({'Quantidade': 'sum', 'Valor Item': 'sum'}).rename(columns={'Valor Item': 'Faturamento'})
-            st.dataframe(t2.sort_values('Faturamento', ascending=False).style.format({'Faturamento': formatar_moeda, 'Quantidade': '{:.0f}'}), use_container_width=True)
+        total_fat = df_f['Valor Item'].sum()
+        total_qtd = df_f['Quantidade'].sum()
         
-        with col_b:
-            st.subheader("3. Detalhado (Plataforma + Produto)")
-            t3 = df_f.groupby(['Plataforma', 'Produto'], as_index=False).agg({'Quantidade': 'sum', 'Valor Item': 'sum'}).rename(columns={'Valor Item': 'Faturamento'})
-            st.dataframe(t3.sort_values(['Plataforma', 'Faturamento'], ascending=[True, False]).style.format({'Faturamento': formatar_moeda, 'Quantidade': '{:.0f}'}), use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Faturamento", f"R$ {total_fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        c2.metric("Quantidade", f"{int(total_qtd):,}".replace(",", "."))
+        c3.metric("Ticket Médio", f"R$ {(total_fat/len(df_f) if len(df_f)>0 else 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
         st.markdown("---")
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_f.to_excel(writer, index=False)
-        st.download_button("📥 Baixar Excel", data=buffer.getvalue(), file_name="Inove.xlsx")
+
+        # TABELA PRINCIPAL - Onde estava o erro
+        st.subheader("Análise Detalhada por Produto")
+        
+        # Agrupamento explícito
+        tabela_final = df_f.groupby(['Produto'], as_index=False).agg({
+            'Quantidade': 'sum',
+            'Valor Item': 'sum'
+        }).rename(columns={'Valor Item': 'Faturamento Total'})
+        
+        # Ordenar para ver os principais
+        tabela_final = tabela_final.sort_values('Faturamento Total', ascending=False)
+        
+        st.dataframe(tabela_final, use_container_width=True)
+
+        # Botão de conferência
+        st.write("Dica: Se os nomes ainda estiverem trocados, verifique se a coluna 'Produto' no Sheets não está deslocada.")
