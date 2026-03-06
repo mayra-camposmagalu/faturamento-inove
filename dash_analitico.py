@@ -12,7 +12,7 @@ st.set_page_config(
 
 # Paleta de Cores Definida (com base na logo)
 # Verde Lima Vibrante da Logo: #A2D149
-# Cinza Escuro para Fundo Sidebar/Header: #2F3E4D (Opcional, se quiser escuro lá)
+# Cinza Escuro para Fundo Sidebar/Header: #2F3E4D
 # Branco para Área de Conteúdo: #FFFFFF
 # Preto para Títulos em Fundo Branco: #000000
 # Cinza Médio para Texto Secundário: #555555
@@ -96,11 +96,12 @@ if check_password():
     )
 
     # --- CABEÇALHO E FILTROS ---
-    # Estilo do cabeçalho com o nome da empresa em destaque
+    # Estilo do cabeçalho com logo e nome da empresa em destaque
     st.markdown(
         """
-        <div style="background-color: #2F3E4D; padding: 30px; border-radius: 10px; margin-bottom: 25px;">
-            <h1 style="margin: 0; color: #A2D149 !important; font-weight: 600;">Dash de Faturamento Analítico <span style="color: #FFFFFF;">• Inove</span></h1>
+        <div style="background-color: #2F3E4D; padding: 20px; border-radius: 10px; margin-bottom: 25px; display: flex; align-items: center; gap: 20px;">
+            <img src="URL_DA_SUA_LOGO" alt="Logo Inove" style="height: 60px;">
+            <h1 style="margin: 0; color: #FFFFFF !important; font-weight: 600;">Dash de Faturamento Analítico</h1>
         </div>
         """,
         unsafe_allow_html=True
@@ -232,7 +233,7 @@ if check_password():
             st.markdown(
                 """
                 <div style="background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px;">
-                    <h5 style="color: #A2D149 !important; margin: 0; font-weight: 500;">📊 Faturamento por Canal</h5>
+                    <h5 style="color: #A2D149 !important; margin: 0; font-weight: 500;">📊 Faturamento por Canal</h3>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -245,13 +246,13 @@ if check_password():
             st.markdown(
                 """
                 <div style="background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px;">
-                    <h5 style="color: #A2D149 !important; margin: 0; font-weight: 500;">🏆 Ranking de Produtos</h5>
+                    <h5 style="color: #A2D149 !important; margin: 0; font-weight: 500;">🏆 Ranking de Produtos</h3>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
             resumo_prod = df_f.groupby('Produto', as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'}).sort_values('Faturamento', ascending=False)
-            st.dataframe(resumo_prod.style.format({'Faturamento': formatar_moeda, 'Qtd': '{:.0f}'}), use_container_width=True)
+            st.dataframe(resumo_prod.sort_values('Faturamento', ascending=False).style.format({'Faturamento': formatar_moeda, 'Qtd': '{:.0f}'}), use_container_width=True)
 
         # Seção Detalhada em um Card
         st.markdown(
