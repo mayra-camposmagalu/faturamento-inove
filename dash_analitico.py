@@ -47,11 +47,8 @@ if check_password():
             df['Faturamento'] = pd.to_numeric(v_raw, errors='coerce').fillna(0)
             df['Data'] = pd.to_datetime(df_raw['DT_EMISSÃO'], dayfirst=True, errors='coerce')
             df = df.dropna(subset=['Data'])
-            
-            # Colunas de tempo para ordenação e exibição
             df['Ano_Mes_Ref'] = df['Data'].dt.strftime('%Y-%m')
             df['Mes_Ano'] = df['Data'].dt.strftime('%m/%Y')
-            
             df = df[(df['Produto'] != 'nan') & (df['Faturamento'] > 0)]
             return df
         except Exception as e:
@@ -61,54 +58,67 @@ if check_password():
     df = load_data()
 
     if not df.empty:
-        # --- SEÇÃO FIXA: TABELA DINÂMICA MENSAL (IGNORA FILTROS) ---
-        st.subheader("🗓️ Comparativo Mensal Fixo (Total Geral)")
-        
-        # Criamos a tabela dinâmica: Meses nas colunas, Faturamento como valor
-        df_dinamico = df.groupby(['Ano_Mes_Ref', 'Mes_Ano'], as_index=False)['Faturamento'].sum()
-        df_dinamico = df_dinamico.sort_values('Ano_Mes_Ref')
-        
-        # Transpondo para ficar em formato de linha única com meses nas colunas
+        # --- 1. SEÇÃO FIXA (COMPARATIVO MENSAL) ---
+        st.subheader("🗓️ Comparativo Mensal Geral (Fixo)")
+        df_dinamico = df.groupby(['Ano_Mes_Ref', 'Mes_Ano'], as_index=False)['Faturamento'].sum().sort_values('Ano_Mes_Ref')
         tabela_comparativa = df_dinamico.pivot_table(columns='Mes_Ano', values='Faturamento', aggfunc='sum')
-        
-        # Reordenando as colunas para seguir a ordem cronológica correta
         ordem_meses = df_dinamico['Mes_Ano'].tolist()
         tabela_comparativa = tabela_comparativa[ordem_meses]
-
-        # Exibindo a tabela com formatação de moeda
         st.dataframe(tabela_comparativa.style.format(formatar_moeda), use_container_width=True)
         
         st.markdown("---")
 
-        # --- SIDEBAR (FILTROS) ---
-        st.sidebar.header("Filtros de Análise Detalhada")
+        # --- 2. SIDEBAR (FILTROS) ---
+        st.sidebar.header("Filtros Analíticos")
         meses_lista = sorted(df['Mes_Ano'].unique(), reverse=True)
         mes_sel = st.sidebar.multiselect("Filtrar Mês:", meses_lista, default=meses_lista)
         canais = sorted(df['Canal'].unique())
         opcoes_canal = ["Todos"] + canais
         canal_sel = st.sidebar.multiselect("Filtrar Canal:", opcoes_canal, default=["Todos"])
 
-        # Aplicando filtros apenas para os blocos abaixo
         df_f = df[df['Mes_Ano'].isin(mes_sel)].copy()
         if "Todos" not in canal_sel:
             df_f = df_f[df_f['Canal'].isin(canal_sel)]
 
-        # --- INDICADORES FILTRADOS ---
-        st.subheader("🔍 Detalhamento Analítico (Com Filtros)")
+        # --- 3. KPIs FILTRADOS ---
+        st.subheader("🔍 Resultados Filtrados")
         c1, c2, c3 = st.columns(3)
         total_f = df_f['Faturamento'].sum()
         total_q = df_f['Qtd'].sum()
-        
-        c1.metric("Faturamento Filtrado", formatar_moeda(total_f))
-        c2.metric("Itens Filtrados", f"{int(total_q):,}".replace(",", "."))
+        c1.metric("Faturamento", formatar_moeda(total_f))
+        c2.metric("Itens Vendidos", f"{int(total_q):,}".replace(",", "."))
         c3.metric("Ticket Médio/Item", formatar_moeda(total_f / total_q if total_q > 0 else 0))
 
-        # --- TABELA DE PRODUTOS FILTRADA ---
-        resumo_prod = df_f.groupby('Produto', as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'})
-        st.dataframe(resumo_prod.sort_values('Faturamento', ascending=False).style.format({
-            'Faturamento': formatar_moeda, 
-            'Qtd': '{:.0f}'
-        }), use_container_width=True)
+        # --- 4. TABELAS ANALÍTICAS ---
+        st.markdown("---")
+        col_esq, col_dir = st.columns(2)
+
+        with col_esq:
+            st.subheader("📊 Faturamento por Canal")
+            resumo_canal = df_f.groupby('Canal', as_index=False)['Faturamento'].sum().sort_values('Faturamento', ascending=False)
+            st.dataframe(resumo_canal.style.format({'Faturamento': formatar_moeda}), use_container_width=True)
+
+        with col_dir:
+            st.subheader("🏆 Ranking de Produtos")
+            resumo_prod = df_f.groupby('Produto', as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'}).sort_values('Faturamento', ascending=False)
+            st.dataframe(resumo_prod.style.format({'Faturamento': formatar_moeda, 'Qtd': '{:.0f}'}), use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("📑 Detalhado (Canal + Produto)")
+        detalhe = df_f.groupby(['Canal', 'Produto'], as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'}).sort_values(['Canal', 'Faturamento'], ascending=[True, False])
+        st.dataframe(detalhe.style.format({'Faturamento': formatar_moeda, 'Qtd': '{:.0f}'}), use_container_width=True)
+
+        # --- 5. EXTRAÇÃO DE DADOS (EXCEL) ---
+        st.markdown("---")
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df_f.to_excel(writer, index=False)
+        st.download_button(
+            label="📥 Extrair Dados Analíticos (Excel)",
+            data=buffer.getvalue(),
+            file_name=f"Analitico_Inove_{pd.Timestamp.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     else:
-        st.info("Aguardando carregamento de dados...")
+        st.info("Aguardando carregamento de dados do Google Planilhas...")
