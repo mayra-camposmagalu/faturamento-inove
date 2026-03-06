@@ -27,7 +27,11 @@ if check_password():
     st.title("📊 Faturamento Inove")
     st.markdown("---")
 
-    LINK_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0d0ocvTeVlsTsefpEWaiefrs24ZLT6J_ZeqbmXyztSMBd1iCYtxvMKWONdhRy-kmA14uHwTiufFg2/pub?gid=1866890896&single=true&output=csv"
+    # LINK PARA LEITURA (CSV)
+    LINK_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0d0ocvTeVlsTsefpEWaiefrs24ZLT6J_ZeqbmXyztSMBd1iCYtxvMKWONdhRy-kmA14uHwTiufFg2/pub?gid=1866890896&single=true&output=csv"
+    
+    # LINK PARA EDIÇÃO (Google Planilhas)
+    LINK_EDIT = "https://docs.google.com/spreadsheets/d/1vQ0d0ocvTeVlsTsefpEWaiefrs24ZLT6J_ZeqbmXyztSMBd1iCYtxvMKWONdhRy-kmA14uHwTiufFg2/edit#gid=1866890896"
 
     def formatar_moeda(valor):
         return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -35,7 +39,7 @@ if check_password():
     @st.cache_data(ttl=5)
     def load_data():
         try:
-            df_raw = pd.read_csv(LINK_BASE, on_bad_lines='skip', low_memory=False)
+            df_raw = pd.read_csv(LINK_CSV, on_bad_lines='skip', low_memory=False)
             df_raw.columns = [str(c).strip() for c in df_raw.columns]
             df = pd.DataFrame()
             df['Canal'] = df_raw['ITEM_CANAL'].astype(str).str.strip()
@@ -108,17 +112,29 @@ if check_password():
         detalhe = df_f.groupby(['Canal', 'Produto'], as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'}).sort_values(['Canal', 'Faturamento'], ascending=[True, False])
         st.dataframe(detalhe.style.format({'Faturamento': formatar_moeda, 'Qtd': '{:.0f}'}), use_container_width=True)
 
-        # --- 5. EXTRAÇÃO DE DADOS (EXCEL) ---
+        # --- 5. EXTRAÇÃO E ACESSO AOS DADOS ---
         st.markdown("---")
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_f.to_excel(writer, index=False)
-        st.download_button(
-            label="📥 Extrair Dados Analíticos (Excel)",
-            data=buffer.getvalue(),
-            file_name=f"Analitico_Inove_{pd.Timestamp.now().strftime('%d_%m_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.subheader("📂 Opções de Exportação e Acesso")
+        
+        col_ex1, col_ex2 = st.columns(2)
+
+        with col_ex1:
+            # Baixar para Excel Local
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df_f.to_excel(writer, index=False)
+            st.download_button(
+                label="📥 Baixar para abrir no EXCEL",
+                data=buffer.getvalue(),
+                file_name=f"Analitico_Inove_{pd.Timestamp.now().strftime('%d_%m_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+        with col_ex2:
+            # Link direto para o Google Planilhas
+            st.link_button("🌐 Abrir no GOOGLE PLANILHAS", LINK_EDIT, use_container_width=True)
+            st.caption("Nota: O Google Planilhas abrirá a base de dados completa para edição.")
 
     else:
         st.info("Aguardando carregamento de dados do Google Planilhas...")
