@@ -47,9 +47,11 @@ if check_password():
             df['Faturamento'] = pd.to_numeric(v_raw, errors='coerce').fillna(0)
             df['Data'] = pd.to_datetime(df_raw['DT_EMISSÃO'], dayfirst=True, errors='coerce')
             df = df.dropna(subset=['Data'])
-            # Criamos uma coluna de ordenação para os meses ficarem na sequência correta
+            
+            # Colunas de tempo para ordenação e exibição
             df['Ano_Mes_Ref'] = df['Data'].dt.strftime('%Y-%m')
             df['Mes_Ano'] = df['Data'].dt.strftime('%m/%Y')
+            
             df = df[(df['Produto'] != 'nan') & (df['Faturamento'] > 0)]
             return df
         except Exception as e:
@@ -59,49 +61,49 @@ if check_password():
     df = load_data()
 
     if not df.empty:
-        # --- SEÇÃO FIXA: COMPARATIVO MENSAL (IGNORA FILTROS) ---
-        st.subheader("📈 Evolução Mensal do Faturamento (Total Geral)")
+        # --- SEÇÃO FIXA: TABELA DINÂMICA MENSAL (IGNORA FILTROS) ---
+        st.subheader("🗓️ Comparativo Mensal Fixo (Total Geral)")
         
-        # Agrupamos pelo Ano_Mes_Ref para garantir a ordem cronológica no gráfico
-        df_fixo = df.groupby(['Ano_Mes_Ref', 'Mes_Ano'], as_index=False)['Faturamento'].sum()
-        df_fixo = df_fixo.sort_values('Ano_Mes_Ref')
+        # Criamos a tabela dinâmica: Meses nas colunas, Faturamento como valor
+        df_dinamico = df.groupby(['Ano_Mes_Ref', 'Mes_Ano'], as_index=False)['Faturamento'].sum()
+        df_dinamico = df_dinamico.sort_values('Ano_Mes_Ref')
+        
+        # Transpondo para ficar em formato de linha única com meses nas colunas
+        tabela_comparativa = df_dinamico.pivot_table(columns='Mes_Ano', values='Faturamento', aggfunc='sum')
+        
+        # Reordenando as colunas para seguir a ordem cronológica correta
+        ordem_meses = df_dinamico['Mes_Ano'].tolist()
+        tabela_comparativa = tabela_comparativa[ordem_meses]
 
-        # Exibição do Comparativo em Colunas (Métricas Rápidas)
-        cols_fixas = st.columns(len(df_fixo))
-        for i, row in df_fixo.iterrows():
-            with cols_fixas[i]:
-                st.metric(label=row['Mes_Ano'], value=formatar_moeda(row['Faturamento']))
-        
-        # Opcional: Gráfico de Barras Fixo
-        st.bar_chart(df_fixo.set_index('Mes_Ano')['Faturamento'])
+        # Exibindo a tabela com formatação de moeda
+        st.dataframe(tabela_comparativa.style.format(formatar_moeda), use_container_width=True)
         
         st.markdown("---")
 
         # --- SIDEBAR (FILTROS) ---
-        st.sidebar.header("Filtros de Análise Analítica")
-        meses = sorted(df['Mes_Ano'].unique(), reverse=True)
-        mes_sel = st.sidebar.multiselect("Filtrar Mês:", meses, default=meses)
+        st.sidebar.header("Filtros de Análise Detalhada")
+        meses_lista = sorted(df['Mes_Ano'].unique(), reverse=True)
+        mes_sel = st.sidebar.multiselect("Filtrar Mês:", meses_lista, default=meses_lista)
         canais = sorted(df['Canal'].unique())
         opcoes_canal = ["Todos"] + canais
         canal_sel = st.sidebar.multiselect("Filtrar Canal:", opcoes_canal, default=["Todos"])
 
-        # Aplicando filtros apenas para a parte de baixo (Análise Detalhada)
+        # Aplicando filtros apenas para os blocos abaixo
         df_f = df[df['Mes_Ano'].isin(mes_sel)].copy()
         if "Todos" not in canal_sel:
             df_f = df_f[df_f['Canal'].isin(canal_sel)]
 
-        # --- INDICADORES FILTRADOS (KPIs) ---
-        st.subheader("🔍 Análise Filtrada")
+        # --- INDICADORES FILTRADOS ---
+        st.subheader("🔍 Detalhamento Analítico (Com Filtros)")
         c1, c2, c3 = st.columns(3)
         total_f = df_f['Faturamento'].sum()
         total_q = df_f['Qtd'].sum()
         
-        c1.metric("Fat. no Filtro", formatar_moeda(total_f))
-        c2.metric("Itens no Filtro", f"{int(total_q):,}".replace(",", "."))
+        c1.metric("Faturamento Filtrado", formatar_moeda(total_f))
+        c2.metric("Itens Filtrados", f"{int(total_q):,}".replace(",", "."))
         c3.metric("Ticket Médio/Item", formatar_moeda(total_f / total_q if total_q > 0 else 0))
 
-        # --- TABELAS ANALÍTICAS ---
-        st.subheader("Detalhamento (Baseado nos Filtros)")
+        # --- TABELA DE PRODUTOS FILTRADA ---
         resumo_prod = df_f.groupby('Produto', as_index=False).agg({'Qtd': 'sum', 'Faturamento': 'sum'})
         st.dataframe(resumo_prod.sort_values('Faturamento', ascending=False).style.format({
             'Faturamento': formatar_moeda, 
